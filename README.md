@@ -18,19 +18,19 @@
 
 ### 本地 Ollama（需安装 [Ollama](https://ollama.com)）
 
-| 模型 ID       | 说明                |
-|---------------|---------------------|
-| `qwen2.5:7b` | Qwen2.5 7B (默认)   |
+| 模型 ID      | 说明              |
+| ------------ | ----------------- |
+| `qwen2.5:7b` | Qwen2.5 7B (默认) |
 
 运行 `ollama pull qwen2.5:7b` 下载模型后即可使用。
 
 ### SiliconFlow 云 API（[免费注册](https://cloud.siliconflow.cn/account/ak)）
 
-| 模型 ID                               | 说明                 |
-|---------------------------------------|----------------------|
-| `Qwen/Qwen3-8B`                      | Qwen3 8B (免费)     |
+| 模型 ID                                   | 说明                  |
+| ----------------------------------------- | --------------------- |
+| `Qwen/Qwen3-8B`                           | Qwen3 8B (免费)       |
 | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek R1 7B (免费) |
-| `Qwen/Qwen2.5-7B-Instruct`           | Qwen2.5 7B (免费)   |
+| `Qwen/Qwen2.5-7B-Instruct`                | Qwen2.5 7B (免费)     |
 
 ## 快速开始
 
@@ -101,10 +101,10 @@ curl -X POST http://127.0.0.1:11434/api/chat -d "{\"model\":\"qwen2.5:7b\",\"mes
 
 Vite 开发服务器通过代理转发 AI API 请求，无需处理跨域。配置在 `vite.config.js`：
 
-| 前端路径              | 代理目标                              |
-|-----------------------|---------------------------------------|
-| `/api/*`              | `https://api.siliconflow.cn/v1/*`    |
-| `/ollama/*`           | `http://127.0.0.1:11434/*`           |
+| 前端路径    | 代理目标                          |
+| ----------- | --------------------------------- |
+| `/api/*`    | `https://api.siliconflow.cn/v1/*` |
+| `/ollama/*` | `http://127.0.0.1:11434/*`        |
 
 ## 项目结构
 
