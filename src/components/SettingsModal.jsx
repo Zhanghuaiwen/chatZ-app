@@ -77,7 +77,7 @@ export default function SettingsModal({ settings, onSave, onClose }) {
               >
                 SiliconFlow
               </a>{" "}
-              免费注册获取（无需信用卡）
+              免费注册获取
             </div>
           </div>
         )}

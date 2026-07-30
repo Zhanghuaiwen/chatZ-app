@@ -6,9 +6,10 @@ export default function ChatWindow({
   settings,
   onQuickAction,
   chatEndRef,
+  chatContainerRef,
 }) {
   return (
-    <div className="chat-container">
+    <div className="chat-container" ref={chatContainerRef}>
       {messages.length === 0 ? (
         <div className="welcome">
           <div className="welcome-icon">Z</div>

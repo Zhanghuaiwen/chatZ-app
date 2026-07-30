@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
-import { STORAGE_KEY, SYSTEM_PROMPT, PROVIDERS, generateId } from "./constants";
+import { SYSTEM_PROMPT, PROVIDERS, generateId } from "./constants";
 import { loadData, saveData } from "./utils";
 import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
@@ -26,6 +26,7 @@ export default function App() {
   const [abortController, setAbortController] = useState(null);
 
   const chatEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
   const textareaRef = useRef(null);
 
   const activeConv = conversations.find((c) => c.id === activeId);
@@ -36,7 +37,12 @@ export default function App() {
   }, [conversations, activeId, settings]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const threshold = 120;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < threshold) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   });
 
   const autoResize = useCallback(() => {
@@ -174,41 +180,48 @@ export default function App() {
         const lines = buffer.split("\n");
         buffer = lines.pop();
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-          try {
-            const json = JSON.parse(trimmed);
-            let delta = "";
-            if (settings.provider === "ollama") {
-              delta = json.message?.content || "";
-            } else {
-              if (json.choices?.[0]?.finish_reason === "break") continue;
-              delta = json.choices?.[0]?.delta?.content || "";
-            }
-
-            if (delta) {
-              assistantContent += delta;
-              const snap = assistantContent;
-              setConversations((prev) =>
-                prev.map((c) =>
-                  c.id === convId
-                    ? {
-                        ...c,
-                        messages: [
-                          ...c.messages.slice(0, -1),
-                          { role: "assistant", content: snap },
-                        ],
-                      }
-                    : c,
-                ),
-              );
-            }
-          } catch {
-            // ignore invalid JSON chunks
+        try {
+          let raw = trimmed;
+          if (settings.provider !== "ollama") {
+            if (raw === "data: [DONE]") break;
+            if (!raw.startsWith("data: ")) continue;
+            raw = raw.slice(6);
           }
+
+          const json = JSON.parse(raw);
+          let delta = "";
+          if (settings.provider === "ollama") {
+            delta = json.message?.content || "";
+          } else {
+            if (json.choices?.[0]?.finish_reason === "break") continue;
+            delta = json.choices?.[0]?.delta?.content || "";
+          }
+
+          if (delta) {
+            assistantContent += delta;
+            const snap = assistantContent;
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === convId
+                  ? {
+                      ...c,
+                      messages: [
+                        ...c.messages.slice(0, -1),
+                        { role: "assistant", content: snap },
+                      ],
+                    }
+                  : c,
+              ),
+            );
+          }
+        } catch {
+          // ignore invalid JSON chunks
         }
+      }
       }
     } catch (err) {
       if (err.name !== "AbortError") {
@@ -304,6 +317,7 @@ export default function App() {
           settings={settings}
           onQuickAction={handleQuickAction}
           chatEndRef={chatEndRef}
+          chatContainerRef={chatContainerRef}
         />
 
         <InputArea

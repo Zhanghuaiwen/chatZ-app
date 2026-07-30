@@ -10,12 +10,12 @@ export const PROVIDERS = {
   siliconflow: {
     name: "SiliconFlow 云",
     models: [
-      { id: "Qwen/Qwen3-8B", name: "Qwen3 8B (免费)" },
       {
-        id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        name: "DeepSeek R1 7B (免费)",
+        id: "deepseek-ai/DeepSeek-V4-Pro",
+        name: "deepseek-ai/DeepSeek-V4-Pro（付费",
       },
-      { id: "Qwen/Qwen2.5-7B-Instruct", name: "Qwen2.5 7B (免费)" },
+      { id: "tencent/Hunyuan-MT-7B", name: "腾讯混元翻译" },
+      { id: "deepseek-ai/DeepSeek-OCR", name: "DeepSeek OCR" },
     ],
   },
 };
