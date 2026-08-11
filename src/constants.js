@@ -1,4 +1,5 @@
 export const STORAGE_KEY = "chatz_data";
+export const APP_NAME = "ChatZ";
 export const SYSTEM_PROMPT =
   "You are a helpful assistant. Answer concisely and clearly. When writing code, use markdown code blocks with the appropriate language tag.";
 

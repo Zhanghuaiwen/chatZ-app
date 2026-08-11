@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { APP_NAME } from "../constants";
+
 export default function Sidebar({
   conversations,
   activeId,
@@ -11,17 +14,106 @@ export default function Sidebar({
   theme,
   onToggleTheme,
 }) {
+  const [query, setQuery] = useState("");
+
+  const keyword = query.trim().toLowerCase();
+  const filtered =
+    keyword.length > 0
+      ? conversations.filter((c) =>
+          c.title.toLowerCase().includes(keyword),
+        )
+      : conversations;
+
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        <button className="new-chat-btn" onClick={onNewChat}>
+      <div className="sidebar-top">
+        <div className="brand-row">
+          <div className="brand">
+            <span className="brand-icon">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M13 2L4.09 12.93a1 1 0 00.78 1.63H11l-1.2 7.12a.75.75 0 001.3.65l9.81-11.9A1 1 0 0020 8.44H14l.85-5.34A.75.75 0 0013 2z" />
+              </svg>
+            </span>
+            <span className="brand-name">{APP_NAME}</span>
+          </div>
+          <button
+            className="sidebar-toggle-btn"
+            onClick={onClose}
+            title="收起侧边栏"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="search-box">
           <svg
-            width="18"
-            height="18"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
+          <input
+            className="search-input"
+            type="text"
+            placeholder="搜索对话..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索对话"
+          />
+          {query && (
+            <button
+              className="search-clear"
+              onClick={() => setQuery("")}
+              title="清除搜索"
+              aria-label="清除搜索"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        <button className="new-chat-btn" onClick={onNewChat}>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           >
@@ -29,52 +121,46 @@ export default function Sidebar({
           </svg>
           新对话
         </button>
-        <button className="sidebar-toggle-btn" onClick={onClose}>
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
       </div>
 
       <div className="conversation-list">
-        {conversations.map((c) => (
-          <div
-            key={c.id}
-            className={`conv-item ${c.id === activeId ? "active" : ""}`}
-            onClick={() => onSelectConversation(c.id)}
-          >
-            <span className="conv-item-text">{c.title}</span>
-            <button
-              className="conv-item-delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteConversation(c.id);
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-              </svg>
-            </button>
+        {filtered.length === 0 ? (
+          <div className="search-empty">
+            {conversations.length === 0
+              ? "暂无对话，点击上方开始吧"
+              : "没有匹配的对话"}
           </div>
-        ))}
+        ) : (
+          filtered.map((c) => (
+            <div
+              key={c.id}
+              className={`conv-item ${c.id === activeId ? "active" : ""}`}
+              onClick={() => onSelectConversation(c.id)}
+            >
+              <span className="conv-item-text">{c.title}</span>
+              <button
+                className="conv-item-delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteConversation(c.id);
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                </svg>
+              </button>
+            </div>
+          ))
+        )}
       </div>
 
       <div className="sidebar-footer">
