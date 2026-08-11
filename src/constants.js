@@ -5,7 +5,9 @@ export const SYSTEM_PROMPT =
 export const PROVIDERS = {
   ollama: {
     name: "本地 Ollama",
-    models: [{ id: "qwen2.5:7b", name: "Qwen2.5 7B (本地)" }],
+    models: [
+      { id: "deepseek-coder-v2:latest", name: "Deepseek-coder-v2 (本地)" },
+    ],
   },
   siliconflow: {
     name: "SiliconFlow 云",

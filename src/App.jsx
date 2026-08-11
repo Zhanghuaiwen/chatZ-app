@@ -18,23 +18,47 @@ export default function App() {
   const [settings, setSettings] = useState(() => {
     const s = saved?.settings;
     if (!s || !s.provider)
-      return { provider: "ollama", apiKey: "", model: "qwen2.5:7b" };
+      return {
+        provider: "ollama",
+        apiKey: "",
+        model: "deepseek-coder-v2:latest",
+      };
     return s;
   });
   const [showSettings, setShowSettings] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    return typeof window !== "undefined" && window.innerWidth > 768;
+  });
   const [abortController, setAbortController] = useState(null);
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("chatz_theme") || "dark";
+    } catch {
+      return "dark";
+    }
+  });
 
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const textareaRef = useRef(null);
+  const sendingRef = useRef(false);
+  const roundRef = useRef(0);
 
   const activeConv = conversations.find((c) => c.id === activeId);
   const messages = activeConv?.messages || [];
+  const isMobile =
+    typeof window !== "undefined" && window.innerWidth <= 768;
 
   useEffect(() => {
     saveData({ conversations, activeId, settings });
   }, [conversations, activeId, settings]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("chatz_theme", theme);
+    } catch {}
+  }, [theme]);
 
   useEffect(() => {
     const el = chatContainerRef.current;
@@ -60,7 +84,7 @@ export default function App() {
       ...prev,
     ]);
     setActiveId(id);
-    setSidebarOpen(false);
+    if (isMobile) setSidebarOpen(false);
   };
 
   const deleteConversation = (id) => {
@@ -71,12 +95,15 @@ export default function App() {
   };
 
   const sendMessage = async (text) => {
-    if (!text?.trim() || isLoading) return;
+    if (!text?.trim() || isLoading || sendingRef.current) return;
 
     if (settings.provider === "siliconflow" && !settings.apiKey) {
       setShowSettings(true);
       return;
     }
+
+    sendingRef.current = true;
+    const round = ++roundRef.current;
 
     let convId = activeId;
     if (!convId) {
@@ -106,6 +133,9 @@ export default function App() {
 
     const controller = new AbortController();
     setAbortController(controller);
+
+    let reader = null;
+    const isStale = () => roundRef.current !== round;
 
     try {
       const currentConv = conversations.find((c) => c.id === convId) || {
@@ -156,10 +186,60 @@ export default function App() {
         throw new Error(msg || `请求失败 (${res.status})`);
       }
 
-      const reader = res.body.getReader();
+      reader = res.body.getReader();
       const decoder = new TextDecoder();
       let assistantContent = "";
       let buffer = "";
+      let streamEnded = false;
+
+      const appendDelta = (snap) => {
+        if (isStale()) return;
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId
+              ? {
+                  ...c,
+                  messages: [
+                    ...c.messages.slice(0, -1),
+                    { role: "assistant", content: snap },
+                  ],
+                }
+              : c,
+          ),
+        );
+      };
+
+      const processLine = (raw) => {
+        if (isStale()) return false;
+        const trimmed = raw.trim();
+        if (!trimmed) return true;
+
+        try {
+          let line = trimmed;
+          if (settings.provider !== "ollama") {
+            if (line === "data: [DONE]") return false;
+            if (!line.startsWith("data: ")) return true;
+            line = line.slice(6);
+          }
+
+          const json = JSON.parse(line);
+          let delta = "";
+          if (settings.provider === "ollama") {
+            delta = json.message?.content || "";
+          } else {
+            if (json.choices?.[0]?.finish_reason === "break") return true;
+            delta = json.choices?.[0]?.delta?.content || "";
+          }
+
+          if (delta) {
+            assistantContent += delta;
+            appendDelta(assistantContent);
+          }
+        } catch {
+          // ignore invalid JSON chunks
+        }
+        return true;
+      };
 
       setConversations((prev) =>
         prev.map((c) =>
@@ -172,7 +252,7 @@ export default function App() {
         ),
       );
 
-      while (true) {
+      while (!streamEnded) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -180,73 +260,53 @@ export default function App() {
         const lines = buffer.split("\n");
         buffer = lines.pop();
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        try {
-          let raw = trimmed;
-          if (settings.provider !== "ollama") {
-            if (raw === "data: [DONE]") break;
-            if (!raw.startsWith("data: ")) continue;
-            raw = raw.slice(6);
+        for (const line of lines) {
+          if (!processLine(line)) {
+            streamEnded = true;
+            break;
           }
-
-          const json = JSON.parse(raw);
-          let delta = "";
-          if (settings.provider === "ollama") {
-            delta = json.message?.content || "";
-          } else {
-            if (json.choices?.[0]?.finish_reason === "break") continue;
-            delta = json.choices?.[0]?.delta?.content || "";
-          }
-
-          if (delta) {
-            assistantContent += delta;
-            const snap = assistantContent;
-            setConversations((prev) =>
-              prev.map((c) =>
-                c.id === convId
-                  ? {
-                      ...c,
-                      messages: [
-                        ...c.messages.slice(0, -1),
-                        { role: "assistant", content: snap },
-                      ],
-                    }
-                  : c,
-              ),
-            );
-          }
-        } catch {
-          // ignore invalid JSON chunks
         }
       }
+
+      buffer += decoder.decode();
+      if (buffer.trim() && !streamEnded) {
+        streamEnded = !processLine(buffer);
       }
     } catch (err) {
-      if (err.name !== "AbortError") {
+      if (err.name !== "AbortError" && !isStale()) {
         setConversations((prev) =>
-          prev.map((c) =>
-            c.id === convId
-              ? {
-                  ...c,
-                  messages: [
-                    ...c.messages,
-                    { role: "assistant", content: `错误: ${err.message}` },
-                  ],
-                }
-              : c,
-          ),
+          prev.map((c) => {
+            if (c.id !== convId) return c;
+            const msgs = [...c.messages];
+            const last = msgs[msgs.length - 1];
+            if (last?.role === "assistant") {
+              msgs[msgs.length - 1] = {
+                ...last,
+                content: `${last.content || ""}\n\n错误: ${err.message}`,
+              };
+            } else {
+              msgs.push({ role: "assistant", content: `错误: ${err.message}` });
+            }
+            return { ...c, messages: msgs };
+          }),
         );
       }
     } finally {
+      try {
+        reader?.cancel();
+      } catch {}
+      if (roundRef.current === round) sendingRef.current = false;
       setIsLoading(false);
       setAbortController(null);
+      console.debug(
+        `[ChatZ] Round ${round} response completed, buffer purged.`,
+      );
     }
   };
 
   const stopGeneration = () => {
     abortController?.abort();
+    sendingRef.current = false;
     setIsLoading(false);
     setAbortController(null);
   };
@@ -268,7 +328,7 @@ export default function App() {
 
   return (
     <div className="app">
-      {sidebarOpen && (
+      {sidebarOpen && isMobile && (
         <div
           className="modal-overlay"
           onClick={() => setSidebarOpen(false)}
@@ -276,23 +336,27 @@ export default function App() {
         />
       )}
 
-      <Sidebar
-        conversations={conversations}
-        activeId={activeId}
-        providerLabel={providerLabel}
-        modelLabel={modelLabel}
-        onNewChat={createNewChat}
-        onSelectConversation={(id) => {
-          setActiveId(id);
-          setSidebarOpen(false);
-        }}
-        onDeleteConversation={deleteConversation}
-        onSettings={() => setShowSettings(true)}
-        onClose={() => setSidebarOpen(false)}
-        sidebarOpen={sidebarOpen}
-      />
+      <div className={`sidebar-slot ${sidebarOpen ? "open" : "collapsed"}`}>
+        <Sidebar
+          conversations={conversations}
+          activeId={activeId}
+          providerLabel={providerLabel}
+          modelLabel={modelLabel}
+          onNewChat={createNewChat}
+          onSelectConversation={(id) => {
+            setActiveId(id);
+            if (isMobile) setSidebarOpen(false);
+          }}
+          onDeleteConversation={deleteConversation}
+          onSettings={() => setShowSettings(true)}
+          onClose={() => setSidebarOpen(false)}
+          theme={theme}
+          onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        />
+      </div>
 
       <main className="main-area">
+        {!sidebarOpen && (
         <button
           className="mobile-sidebar-toggle"
           onClick={() => setSidebarOpen(true)}
@@ -310,6 +374,7 @@ export default function App() {
             <path d="M3 12h18M3 6h18M3 18h18" />
           </svg>
         </button>
+        )}
 
         <ChatWindow
           messages={messages}

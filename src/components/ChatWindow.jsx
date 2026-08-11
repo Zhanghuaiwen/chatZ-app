@@ -82,6 +82,7 @@ export default function ChatWindow({
             </div>
           )}
           <div ref={chatEndRef} />
+          <div className="chat-spacer" />
         </div>
       )}
     </div>
