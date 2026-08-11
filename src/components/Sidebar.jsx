@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { APP_NAME } from "../constants";
+import "./Sidebar.css";
 
 export default function Sidebar({
   conversations,
@@ -42,7 +43,7 @@ export default function Sidebar({
             <span className="brand-name">{APP_NAME}</span>
           </div>
           <button
-            className="sidebar-toggle-btn"
+            className="icon-btn sidebar-toggle-btn"
             onClick={onClose}
             title="收起侧边栏"
           >
@@ -167,7 +168,7 @@ export default function Sidebar({
         <div className="provider-badge">
           {providerLabel} - {modelLabel}
         </div>
-        <button className="settings-btn" onClick={onSettings}>
+        <button className="footer-btn" onClick={onSettings}>
           <svg
             width="18"
             height="18"
@@ -183,7 +184,7 @@ export default function Sidebar({
           </svg>
           设置
         </button>
-        <button className="theme-toggle-btn" onClick={onToggleTheme}>
+        <button className="footer-btn" onClick={onToggleTheme}>
           {theme === "dark" ? (
             <svg
               width="18"

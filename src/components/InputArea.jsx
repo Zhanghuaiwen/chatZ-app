@@ -1,3 +1,5 @@
+import "./InputArea.css";
+
 export default function InputArea({
   input,
   onInputChange,

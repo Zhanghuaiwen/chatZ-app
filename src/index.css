@@ -1,6 +1,99 @@
-body {
+/* Global: reset, theme variables, base element styles, shared primitives. */
+
+* {
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #1b1d22;
+  --bg-secondary: #22252b;
+  --bg-tertiary: #2c3038;
+  --bg-hover: #353a44;
+  --bg-active: #414750;
+  --text-primary: #ececec;
+  --text-secondary: #b4b4b4;
+  --text-muted: #8e8e8e;
+  --border-color: #3a3f48;
+  --accent: #10a37f;
+  --accent-hover: #1a7f64;
+  --input-bg: #2c3038;
+  --bg-app: #131417;
+  --code-bg: #131417;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow-side: 6px 0 24px rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 10px 32px rgba(0, 0, 0, 0.32);
+  --sidebar-width: 260px;
+  --radius: 14px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --edge-glow: rgba(0, 0, 0, 0.35);
+  --brand-gradient: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  --brand-glow: rgba(16, 163, 127, 0.28);
+  --search-bg: rgba(255, 255, 255, 0.06);
+  --search-bg-focus: rgba(255, 255, 255, 0.1);
+  --chat-header-height: 54px;
+}
+
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f8;
+  --bg-tertiary: #ececef;
+  --bg-hover: #e4e4e8;
+  --bg-active: #d8d8dd;
+  --text-primary: #1f1f23;
+  --text-secondary: #48484f;
+  --text-muted: #8b8b93;
+  --border-color: #e0e0e5;
+  --accent: #10a37f;
+  --accent-hover: #0e8d6d;
+  --input-bg: #ffffff;
+  --bg-app: #e9ebee;
+  --code-bg: #f6f8fa;
+  --overlay: rgba(20, 22, 26, 0.35);
+  --shadow-side: 6px 0 24px rgba(30, 32, 38, 0.1);
+  --shadow-card: 0 8px 24px rgba(30, 32, 38, 0.08);
+  --edge-glow: rgba(20, 22, 26, 0.12);
+  --brand-gradient: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  --brand-glow: rgba(16, 163, 127, 0.22);
+  --search-bg: rgba(20, 22, 26, 0.04);
+  --search-bg-focus: rgba(20, 22, 26, 0.07);
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  transition: background 0.3s ease, color 0.3s ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Shared flat icon button; component classes add size/padding variants. */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }

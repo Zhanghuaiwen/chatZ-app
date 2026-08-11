@@ -1,7 +1,14 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
-import { SYSTEM_PROMPT, PROVIDERS, generateId } from "./constants";
+import { DEFAULT_SETTINGS, PROVIDERS, generateId } from "./constants";
 import { loadData, saveData } from "./utils";
+import {
+  buildAllMessages,
+  buildChatRequest,
+  createStreamParser,
+  consumeStream,
+  readApiError,
+} from "./services/chat";
 import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
 import ChatWindow from "./components/ChatWindow";
@@ -15,21 +22,13 @@ export default function App() {
   const [activeId, setActiveId] = useState(saved?.activeId || null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [settings, setSettings] = useState(() => {
-    const s = saved?.settings;
-    if (!s || !s.provider)
-      return {
-        provider: "ollama",
-        apiKey: "",
-        model: "deepseek-coder-v2:latest",
-      };
-    return s;
-  });
+  const [settings, setSettings] = useState(() =>
+    saved?.settings?.provider ? saved.settings : DEFAULT_SETTINGS,
+  );
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     return typeof window !== "undefined" && window.innerWidth > 768;
   });
-  const [abortController, setAbortController] = useState(null);
   const [theme, setTheme] = useState(() => {
     try {
       return localStorage.getItem("chatz_theme") || "dark";
@@ -42,6 +41,7 @@ export default function App() {
   const chatContainerRef = useRef(null);
   const textareaRef = useRef(null);
   const sendingRef = useRef(false);
+  const abortRef = useRef(null);
   const roundRef = useRef(0);
 
   const activeConv = conversations.find((c) => c.id === activeId);
@@ -77,6 +77,13 @@ export default function App() {
     }
   }, []);
 
+  /** Applies `mutate` to the conversation with the given id, via state updater. */
+  const updateConversation = (id, mutate) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? mutate(c) : c)),
+    );
+  };
+
   const createNewChat = () => {
     const id = generateId();
     setConversations((prev) => [
@@ -94,6 +101,35 @@ export default function App() {
     }
   };
 
+  /** Returns the active conversation id, creating a new conversation if needed. */
+  const ensureConversation = (text) => {
+    if (activeId) return activeId;
+    const id = generateId();
+    setConversations((prev) => [
+      { id, title: text.slice(0, 30), messages: [] },
+      ...prev,
+    ]);
+    setActiveId(id);
+    return id;
+  };
+
+  /** Renders an error into the last assistant message, or appends a new one. */
+  const reportError = (convId, err) => {
+    updateConversation(convId, (c) => {
+      const msgs = [...c.messages];
+      const last = msgs[msgs.length - 1];
+      if (last?.role === "assistant") {
+        msgs[msgs.length - 1] = {
+          ...last,
+          content: `${last.content || ""}\n\n错误: ${err.message}`,
+        };
+      } else {
+        msgs.push({ role: "assistant", content: `错误: ${err.message}` });
+      }
+      return { ...c, messages: msgs };
+    });
+  };
+
   const sendMessage = async (text) => {
     if (!text?.trim() || isLoading || sendingRef.current) return;
 
@@ -104,192 +140,56 @@ export default function App() {
 
     sendingRef.current = true;
     const round = ++roundRef.current;
-
-    let convId = activeId;
-    if (!convId) {
-      convId = generateId();
-      setConversations((prev) => [
-        { id: convId, title: text.slice(0, 30), messages: [] },
-        ...prev,
-      ]);
-      setActiveId(convId);
-    }
+    const convId = ensureConversation(text);
 
     const userMsg = { role: "user", content: text.trim() };
-
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? {
-              ...c,
-              title: c.messages.length === 0 ? text.slice(0, 30) : c.title,
-              messages: [...c.messages, userMsg],
-            }
-          : c,
-      ),
-    );
+    updateConversation(convId, (c) => ({
+      ...c,
+      title: c.messages.length === 0 ? text.slice(0, 30) : c.title,
+      messages: [...c.messages, userMsg],
+    }));
     setInput("");
     setIsLoading(true);
 
     const controller = new AbortController();
-    setAbortController(controller);
-
-    let reader = null;
+    abortRef.current = controller;
     const isStale = () => roundRef.current !== round;
 
+    let reader = null;
+
     try {
-      const currentConv = conversations.find((c) => c.id === convId) || {
-        messages: [],
-      };
-      const allMessages = [
-        { role: "system", content: SYSTEM_PROMPT },
-        ...currentConv.messages,
-        userMsg,
-      ];
+      const history = conversations.find((c) => c.id === convId)?.messages || [];
+      const allMessages = buildAllMessages(history, userMsg);
+      const { url, options } = buildChatRequest(settings, allMessages, controller.signal);
 
-      let res;
-      if (settings.provider === "ollama") {
-        res = await fetch("/ollama/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: settings.model,
-            messages: allMessages,
-            stream: true,
-          }),
-          signal: controller.signal,
-        });
-      } else {
-        res = await fetch("/api/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${settings.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: settings.model,
-            messages: allMessages,
-            stream: true,
-            temperature: 0.7,
-            max_tokens: 2048,
-          }),
-          signal: controller.signal,
-        });
-      }
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(await readApiError(res));
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg =
-          typeof err.error === "string"
-            ? err.error
-            : err.error?.message || err.message;
-        throw new Error(msg || `请求失败 (${res.status})`);
-      }
+      const parser = createStreamParser({
+        provider: settings.provider,
+        onDelta: (content) => {
+          if (isStale()) return;
+          updateConversation(convId, (c) => ({
+            ...c,
+            messages: [
+              ...c.messages.slice(0, -1),
+              { role: "assistant", content },
+            ],
+          }));
+        },
+      });
+
+      // Placeholder assistant message updated as stream deltas arrive.
+      updateConversation(convId, (c) => ({
+        ...c,
+        messages: [...c.messages, { role: "assistant", content: "" }],
+      }));
 
       reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      let buffer = "";
-      let streamEnded = false;
-
-      const appendDelta = (snap) => {
-        if (isStale()) return;
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === convId
-              ? {
-                  ...c,
-                  messages: [
-                    ...c.messages.slice(0, -1),
-                    { role: "assistant", content: snap },
-                  ],
-                }
-              : c,
-          ),
-        );
-      };
-
-      const processLine = (raw) => {
-        if (isStale()) return false;
-        const trimmed = raw.trim();
-        if (!trimmed) return true;
-
-        try {
-          let line = trimmed;
-          if (settings.provider !== "ollama") {
-            if (line === "data: [DONE]") return false;
-            if (!line.startsWith("data: ")) return true;
-            line = line.slice(6);
-          }
-
-          const json = JSON.parse(line);
-          let delta = "";
-          if (settings.provider === "ollama") {
-            delta = json.message?.content || "";
-          } else {
-            if (json.choices?.[0]?.finish_reason === "break") return true;
-            delta = json.choices?.[0]?.delta?.content || "";
-          }
-
-          if (delta) {
-            assistantContent += delta;
-            appendDelta(assistantContent);
-          }
-        } catch {
-          // ignore invalid JSON chunks
-        }
-        return true;
-      };
-
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convId
-            ? {
-                ...c,
-                messages: [...c.messages, { role: "assistant", content: "" }],
-              }
-            : c,
-        ),
-      );
-
-      while (!streamEnded) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!processLine(line)) {
-            streamEnded = true;
-            break;
-          }
-        }
-      }
-
-      buffer += decoder.decode();
-      if (buffer.trim() && !streamEnded) {
-        streamEnded = !processLine(buffer);
-      }
+      await consumeStream(reader, parser, isStale);
     } catch (err) {
       if (err.name !== "AbortError" && !isStale()) {
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id !== convId) return c;
-            const msgs = [...c.messages];
-            const last = msgs[msgs.length - 1];
-            if (last?.role === "assistant") {
-              msgs[msgs.length - 1] = {
-                ...last,
-                content: `${last.content || ""}\n\n错误: ${err.message}`,
-              };
-            } else {
-              msgs.push({ role: "assistant", content: `错误: ${err.message}` });
-            }
-            return { ...c, messages: msgs };
-          }),
-        );
+        reportError(convId, err);
       }
     } finally {
       try {
@@ -297,18 +197,15 @@ export default function App() {
       } catch {}
       if (roundRef.current === round) sendingRef.current = false;
       setIsLoading(false);
-      setAbortController(null);
-      console.debug(
-        `[ChatZ] Round ${round} response completed, buffer purged.`,
-      );
+      abortRef.current = null;
     }
   };
 
   const stopGeneration = () => {
-    abortController?.abort();
+    abortRef.current?.abort();
     sendingRef.current = false;
     setIsLoading(false);
-    setAbortController(null);
+    abortRef.current = null;
   };
 
   const handleKeyDown = (e) => {
@@ -317,8 +214,6 @@ export default function App() {
       sendMessage(input);
     }
   };
-
-  const handleQuickAction = (text) => sendMessage(text);
 
   const providerLabel =
     settings.provider === "ollama" ? "本地 Ollama" : "SiliconFlow";
@@ -359,7 +254,7 @@ export default function App() {
         <header className="chat-header">
           {!sidebarOpen && (
             <button
-              className="chat-header-toggle"
+              className="icon-btn chat-header-toggle"
               onClick={() => setSidebarOpen(true)}
               title="打开侧边栏"
             >
@@ -401,7 +296,7 @@ export default function App() {
           messages={messages}
           isLoading={isLoading}
           settings={settings}
-          onQuickAction={handleQuickAction}
+          onQuickAction={sendMessage}
           chatEndRef={chatEndRef}
           chatContainerRef={chatContainerRef}
         />

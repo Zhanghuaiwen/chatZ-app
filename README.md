@@ -34,20 +34,19 @@
 
 ### 本地 Ollama（需安装 [Ollama](https://ollama.com)）
 
-| 模型 ID      | 说明              |
-| ------------ | ----------------- |
-| `qwen2.5:7b` | Qwen2.5 7B (默认) |
+| 模型 ID                     | 说明                    |
+| --------------------------- | ----------------------- |
+| `deepseek-coder-v2:latest` | Deepseek-coder-v2 (默认) |
 
-运行 `ollama pull qwen2.5:7b` 下载模型后即可使用。
+运行 `ollama pull deepseek-coder-v2:latest` 下载模型后即可使用。
 
 ### SiliconFlow 云 API（[免费注册](https://cloud.siliconflow.cn/account/ak)）
 
-| 模型 ID                                   | 说明                  |
-| ----------------------------------------- | --------------------- |
-| `Qwen/Qwen3-8B`                           | Qwen3 8B (免费)       |
-| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek R1 7B (免费) |
-| `Qwen/Qwen2.5-7B-Instruct`                | Qwen2.5 7B (免费)     |
-| `deepseek-ai/DeepSeek-OCR`                | DeepSeek OCR          |
+| 模型 ID                             | 说明              |
+| ----------------------------------- | ----------------- |
+| `deepseek-ai/DeepSeek-V4-Pro`      | DeepSeek V4 Pro (付费) |
+| `tencent/Hunyuan-MT-7B`             | 腾讯混元翻译      |
+| `deepseek-ai/DeepSeek-OCR`          | DeepSeek OCR      |
 
 ## 快速开始
 
@@ -111,7 +110,7 @@ ollama list
 curl http://127.0.0.1:11434/api/tags
 
 # 测试流式对话
-curl -X POST http://127.0.0.1:11434/api/chat -d "{\"model\":\"qwen2.5:7b\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}],\"stream\":true}"
+curl -X POST http://127.0.0.1:11434/api/chat -d "{\"model\":\"deepseek-coder-v2:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}],\"stream\":true}"
 ```
 
 ## 代理配置
@@ -132,14 +131,21 @@ chatz-app/
 ├── src/
 │   ├── main.jsx            # React 入口
 │   ├── App.jsx             # 主应用组件（状态管理、发送逻辑、主题切换）
-│   ├── App.css             # 全局样式（深色/浅色主题变量、卡片式布局）
-│   ├── constants.js        # 常量定义（模型列表、系统提示词）
+│   ├── App.css             # 应用外壳布局（侧边栏槽位、主卡片、聊天头部）
+│   ├── index.css           # 全局样式（主题变量、基础样式、共享 .icon-btn）
+│   ├── constants.js        # 常量定义（模型列表、系统提示词、默认设置）
 │   ├── utils.js            # 工具函数（localStorage、Markdown 渲染）
+│   ├── services/
+│   │   └── chat.js         # 接口层（请求构建、SSE 流解析、错误提取）
 │   └── components/
 │       ├── SettingsModal.jsx   # 设置弹窗（切换来源/模型/API Key）
+│       ├── SettingsModal.css   # 设置弹窗样式
 │       ├── Sidebar.jsx         # 侧边栏（对话列表、设置、主题切换）
+│       ├── Sidebar.css         # 侧边栏样式
 │       ├── InputArea.jsx       # 输入区域（文本框、发送/停止按钮）
-│       └── ChatWindow.jsx      # 聊天窗口（消息列表、欢迎页）
+│       ├── InputArea.css       # 输入区域样式
+│       ├── ChatWindow.jsx      # 聊天窗口（消息列表、欢迎页）
+│       └── ChatWindow.css      # 消息/欢迎页样式
 └── README.md
 ```
 
@@ -161,12 +167,16 @@ chatz-app/
 A: 打开设置面板，确认已选择正确的来源和模型。如使用 Ollama，点击"测试连接"按钮诊断。检查 Ollama 服务是否正在运行。
 
 **Q: Ollama 报错 "model not found"**
-A: 在设置面板中切换一下来源（选回 Ollama），确保模型下拉框显示的是 `qwen2.5:7b`。运行 `ollama list` 确认模型已下载。
+A: 在设置面板中切换一下来源（选回 Ollama），确保模型下拉框显示的是 `deepseek-coder-v2:latest`。运行 `ollama list` 确认模型已下载。
 
 **Q: 外部浏览器无法连接 Ollama，VS Code 内部浏览器正常**
 A: 因为 `vite.config.js` 中已配置代理覆写 `Origin` 头，重启开发服务器后重试。
 
 ## 更新记录
+
+### v0.1.2
+
+- **代码重构**：提取 `src/services/chat.js` 接口层（请求构建 / SSE 流解析 / 错误提取），拆分 `App.jsx` 中过长的 `sendMessage`，统一对话更新模式，删除调试日志与未使用的资源，不改变任何外部行为。
 
 ### v0.1.1
 

@@ -1,0 +1,87 @@
+/* Message input area and send/stop buttons. */
+
+.input-area {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 24px 24px;
+  background: linear-gradient(transparent, var(--bg-primary) 30%);
+}
+
+.input-wrapper {
+  max-width: 768px;
+  margin: 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-box {
+  flex: 1;
+  position: relative;
+  background: var(--input-bg);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 0 0 3px rgba(16, 163, 127, 0.15);
+}
+
+.input-box textarea {
+  width: 100%;
+  padding: 14px 50px 14px 16px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-family: inherit;
+  resize: none;
+  line-height: 1.5;
+  max-height: 200px;
+}
+
+.input-box textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.send-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background 0.15s, opacity 0.15s, transform 0.15s;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.05);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stop-btn {
+  background: #ef4444;
+}
+
+.stop-btn:hover {
+  background: #dc2626 !important;
+}

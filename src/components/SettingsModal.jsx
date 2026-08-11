@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { PROVIDERS } from "../constants";
+import "./SettingsModal.css";
 
 export default function SettingsModal({ settings, onSave, onClose }) {
   const [provider, setProvider] = useState(settings.provider || "ollama");

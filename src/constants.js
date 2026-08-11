@@ -23,6 +23,12 @@ export const PROVIDERS = {
   },
 };
 
+export const DEFAULT_SETTINGS = {
+  provider: "ollama",
+  apiKey: "",
+  model: PROVIDERS.ollama.models[0].id,
+};
+
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
