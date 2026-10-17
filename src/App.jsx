@@ -4,8 +4,16 @@ import { DEFAULT_SETTINGS, PROVIDERS, generateId } from "./constants";
 import { readFileAsDataURL, readFileAsText } from "./utils";
 import { loadState, saveState } from "./store/api";
 import {
-  buildAllMessages,
-  buildChatRequest,
+  getPath,
+  lineage,
+  toApiMessages,
+  appendNode,
+  updateNode,
+  deleteSubtree,
+  switchTo,
+} from "./utils/messageTree";
+import {
+  buildLlmRequest,
   createStreamParser,
   consumeStream,
   readApiError,
@@ -44,7 +52,7 @@ export default function App() {
   const lastPersistedRef = useRef(null);
 
   const activeConv = conversations.find((c) => c.id === activeId);
-  const messages = activeConv?.messages || [];
+  const messages = getPath(activeConv);
   const isMobile =
     typeof window !== "undefined" && window.innerWidth <= 768;
 
@@ -116,7 +124,7 @@ export default function App() {
   const createNewChat = () => {
     const id = generateId();
     setConversations((prev) => [
-      { id, title: "新对话", messages: [] },
+      { id, title: "新对话", nodes: [], headId: null },
       ...prev,
     ]);
     setActiveId(id);
@@ -180,28 +188,119 @@ export default function App() {
     const id = generateId();
     const title = text.trim() || attachments[0]?.name || "新对话";
     setConversations((prev) => [
-      { id, title: title.slice(0, 30), messages: [] },
+      { id, title: title.slice(0, 30), nodes: [], headId: null },
       ...prev,
     ]);
     setActiveId(id);
     return id;
   };
 
-  /** Renders an error into the last assistant message, or appends a new one. */
-  const reportError = (convId, err) => {
+  /** Appends an error caption to a specific assistant node. */
+  const reportNodeError = (convId, nodeId, err) => {
     updateConversation(convId, (c) => {
-      const msgs = [...c.messages];
-      const last = msgs[msgs.length - 1];
-      if (last?.role === "assistant") {
-        msgs[msgs.length - 1] = {
-          ...last,
-          content: `${last.content || ""}\n\n错误: ${err.message}`,
-        };
-      } else {
-        msgs.push({ role: "assistant", content: `错误: ${err.message}` });
-      }
-      return { ...c, messages: msgs };
+      const node = c.nodes.find((n) => n.id === nodeId);
+      return updateNode(c, nodeId, {
+        content: `${node?.content || ""}\n\n错误: ${err.message}`,
+        status: "error",
+      });
     });
+  };
+
+  /**
+   * Streams an assistant reply for `turnNode` (the user turn being answered).
+   * A placeholder assistant node is appended immediately and updated by id as
+   * deltas arrive, so branching/regeneration can target specific nodes.
+   */
+  const streamReply = async (convId, turnNode, historyNodes) => {
+    const round = ++roundRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const isStale = () => roundRef.current !== round;
+    const assistantId = generateId();
+
+    sendingRef.current = true;
+    setIsLoading(true);
+    updateConversation(convId, (c) =>
+      appendNode(c, {
+        id: assistantId,
+        parentId: turnNode.id,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      }),
+    );
+
+    let reader = null;
+    try {
+      const requestParams = {
+        provider: settings.provider,
+        model: settings.model,
+        apiKey: settings.apiKey,
+        conversationId: convId,
+        history: toApiMessages(historyNodes),
+        message: {
+          role: "user",
+          content: turnNode.content,
+          ...(turnNode.attachments?.length
+            ? { attachments: turnNode.attachments }
+            : {}),
+        },
+      };
+      const { url, options } = buildLlmRequest(requestParams, controller.signal);
+
+      let res;
+      try {
+        res = await fetch(url, options);
+      } catch (err) {
+        // Some embedded webviews / older engines reject the AbortSignal when
+        // converting RequestInit. Retry once without a signal so the request
+        // can still go through (stop-generation then simply won't abort it).
+        if (String(err?.message).includes("AbortSignal")) {
+          const fallback = buildLlmRequest(requestParams, undefined);
+          res = await fetch(fallback.url, fallback.options);
+        } else {
+          throw err;
+        }
+      }
+      if (!res.ok) throw new Error(await readApiError(res));
+
+      const parser = createStreamParser({
+        provider: settings.provider,
+        onDelta: (content) => {
+          if (isStale()) return;
+          updateConversation(convId, (c) => updateNode(c, assistantId, { content }));
+        },
+        onUsage: (usage) => {
+          if (isStale()) return;
+          updateConversation(convId, (c) => updateNode(c, assistantId, { usage }));
+        },
+      });
+
+      reader = res.body.getReader();
+      await consumeStream(reader, parser, isStale);
+      if (!isStale()) {
+        updateConversation(convId, (c) =>
+          updateNode(c, assistantId, { status: "complete" }),
+        );
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        if (!isStale()) {
+          updateConversation(convId, (c) =>
+            updateNode(c, assistantId, { status: "aborted" }),
+          );
+        }
+      } else if (!isStale()) {
+        reportNodeError(convId, assistantId, err);
+      }
+    } finally {
+      try {
+        reader?.cancel();
+      } catch {}
+      if (roundRef.current === round) sendingRef.current = false;
+      setIsLoading(false);
+      abortRef.current = null;
+    }
   };
 
   const sendMessage = async (text) => {
@@ -218,87 +317,69 @@ export default function App() {
       return;
     }
 
-    sendingRef.current = true;
-    const round = ++roundRef.current;
     const convId = ensureConversation(text);
-
-    const userMsg = {
+    const conv = conversations.find((c) => c.id === convId);
+    const historyNodes = getPath(conv);
+    const title = text.trim() || attachments[0]?.name || "新对话";
+    const turnNode = {
+      id: generateId(),
+      parentId: conv?.headId ?? null,
       role: "user",
       content: text.trim(),
       ...(attachments.length ? { attachments } : {}),
     };
-    const title = text.trim() || attachments[0]?.name || "新对话";
-    updateConversation(convId, (c) => ({
-      ...c,
-      title: c.messages.length === 0 ? title.slice(0, 30) : c.title,
-      messages: [...c.messages, userMsg],
-    }));
+
+    updateConversation(convId, (c) => {
+      const next = appendNode(c, turnNode);
+      return {
+        ...next,
+        title: (c.nodes?.length ?? 0) === 0 ? title.slice(0, 30) : c.title,
+      };
+    });
     setAttachments([]);
     setInput("");
-    setIsLoading(true);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const isStale = () => roundRef.current !== round;
+    await streamReply(convId, turnNode, historyNodes);
+  };
 
-    let reader = null;
+  /** Regenerates an assistant reply as a new sibling branch. */
+  const regenerateMessage = async (assistantNodeId) => {
+    if (isLoading || sendingRef.current) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    const node = conv.nodes.find((n) => n.id === assistantNodeId);
+    if (!node || node.role !== "assistant" || !node.parentId) return;
+    const turnNode = conv.nodes.find((n) => n.id === node.parentId);
+    if (!turnNode) return;
+    const historyNodes = lineage(conv, node.parentId).slice(0, -1);
+    await streamReply(conv.id, turnNode, historyNodes);
+  };
 
-    try {
-      const history = conversations.find((c) => c.id === convId)?.messages || [];
-      const allMessages = buildAllMessages(history, userMsg, settings.provider);
-      const requestParams = { ...settings, messages: allMessages };
-      const { url, options } = buildChatRequest(requestParams, controller.signal);
+  /** Edits a user turn: creates a sibling user node and regenerates a reply. */
+  const editMessage = async (userNodeId, content) => {
+    if (isLoading || sendingRef.current) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    const node = conv.nodes.find((n) => n.id === userNodeId);
+    if (!node || node.role !== "user") return;
+    const historyNodes = lineage(conv, userNodeId).slice(0, -1);
+    const turnNode = {
+      id: generateId(),
+      parentId: node.parentId ?? null,
+      role: "user",
+      content,
+      ...(node.attachments?.length ? { attachments: node.attachments } : {}),
+    };
+    updateConversation(conv.id, (c) => appendNode(c, turnNode));
+    await streamReply(conv.id, turnNode, historyNodes);
+  };
 
-      let res;
-      try {
-        res = await fetch(url, options);
-      } catch (err) {
-        // Some embedded webviews / older engines reject the AbortSignal when
-        // converting RequestInit. Retry once without a signal so the request
-        // can still go through (stop-generation then simply won't abort it).
-        if (String(err?.message).includes("AbortSignal")) {
-          const fallback = buildChatRequest(requestParams, undefined);
-          res = await fetch(fallback.url, fallback.options);
-        } else {
-          throw err;
-        }
-      }
-      if (!res.ok) throw new Error(await readApiError(res));
+  const removeMessage = (nodeId) => {
+    updateConversation(activeId, (c) => deleteSubtree(c, nodeId));
+  };
 
-      const parser = createStreamParser({
-        provider: settings.provider,
-        onDelta: (content) => {
-          if (isStale()) return;
-          updateConversation(convId, (c) => ({
-            ...c,
-            messages: [
-              ...c.messages.slice(0, -1),
-              { role: "assistant", content },
-            ],
-          }));
-        },
-      });
-
-      // Placeholder assistant message updated as stream deltas arrive.
-      updateConversation(convId, (c) => ({
-        ...c,
-        messages: [...c.messages, { role: "assistant", content: "" }],
-      }));
-
-      reader = res.body.getReader();
-      await consumeStream(reader, parser, isStale);
-    } catch (err) {
-      if (err.name !== "AbortError" && !isStale()) {
-        reportError(convId, err);
-      }
-    } finally {
-      try {
-        reader?.cancel();
-      } catch {}
-      if (roundRef.current === round) sendingRef.current = false;
-      setIsLoading(false);
-      abortRef.current = null;
-    }
+  const switchVariant = (nodeId) => {
+    updateConversation(activeId, (c) => switchTo(c, nodeId));
   };
 
   const stopGeneration = () => {
@@ -394,9 +475,14 @@ export default function App() {
 
         <ChatWindow
           messages={messages}
+          conversation={activeConv}
           isLoading={isLoading}
           settings={settings}
           onQuickAction={sendMessage}
+          onEditMessage={editMessage}
+          onRegenerate={regenerateMessage}
+          onDeleteMessage={removeMessage}
+          onSwitchVariant={switchVariant}
           chatEndRef={chatEndRef}
           chatContainerRef={chatContainerRef}
         />

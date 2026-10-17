@@ -33,32 +33,37 @@ export async function saveStateNow(snapshot) {
   return res.json();
 }
 
-/** Loads the whole app state, migrating legacy localStorage data on first run. */
-export async function loadState() {
+async function fetchState() {
   const res = await fetch("/api/state");
   if (!res.ok) throw new Error(`加载失败 (${res.status})`);
   const data = await res.json();
-
-  const empty = !data.conversations?.length && !data.settings;
-  if (empty) {
-    const legacy = readLegacy();
-    if (legacy?.conversations?.length || legacy?.settings) {
-      const migrated = {
-        conversations: legacy.conversations || [],
-        activeId: legacy.activeId ?? null,
-        settings: legacy.settings ?? null,
-      };
-      await saveStateNow(migrated);
-      clearLegacy();
-      return migrated;
-    }
-  }
-
   return {
     settings: data.settings ?? null,
     activeId: data.activeId ?? null,
     conversations: data.conversations ?? [],
   };
+}
+
+/** Loads the whole app state, migrating legacy localStorage data on first run. */
+export async function loadState() {
+  let state = await fetchState();
+
+  const empty = !state.conversations.length && !state.settings;
+  if (empty) {
+    const legacy = readLegacy();
+    if (legacy?.conversations?.length || legacy?.settings) {
+      await saveStateNow({
+        conversations: legacy.conversations || [],
+        activeId: legacy.activeId ?? null,
+        settings: legacy.settings ?? null,
+      });
+      clearLegacy();
+      // Re-fetch so legacy flat messages come back as a proper node tree.
+      state = await fetchState();
+    }
+  }
+
+  return state;
 }
 
 let timer = null;

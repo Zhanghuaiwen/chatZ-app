@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import { DB_PATH } from "./db/index.js";
 import stateRoutes from "./routes/state.js";
+import llmRoutes from "./routes/llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -16,6 +17,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const app = Fastify({ logger: true, bodyLimit: 64 * 1024 * 1024 });
 
 await app.register(stateRoutes);
+await app.register(llmRoutes);
 
 // Serve the built SPA when it exists (production). In dev the Vite server
 // proxies /api here, so static serving is simply skipped.

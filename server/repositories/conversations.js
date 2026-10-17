@@ -31,94 +31,109 @@ const deleteNodesStmt = db.prepare(
 const insertNodeStmt = db.prepare(
   `INSERT INTO message_nodes
      (id, conversation_id, parent_id, role, content, attachments_json,
-      provider, model, status, selected_child_id, created_at)
+      provider, model, status, selected_child_id, meta_json, created_at)
    VALUES
      (@id, @conversation_id, @parent_id, @role, @content, @attachments_json,
-      @provider, @model, @status, @selected_child_id, @created_at)`,
-);
-const setChildStmt = db.prepare(
-  `UPDATE message_nodes SET selected_child_id = ? WHERE id = ?`,
+      @provider, @model, @status, @selected_child_id, @meta_json, @created_at)`,
 );
 const updateHeadStmt = db.prepare(
   `UPDATE conversations SET head_id = ?, updated_at = ? WHERE id = ?`,
 );
 
-/** Rebuilds the visible flat message array by walking the tree from the
- *  root following each node's selected_child_id. */
-function loadMessages(conversationId) {
-  const nodes = nodesStmt.all(conversationId);
-  if (!nodes.length) return [];
-
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const byParent = new Map();
-  for (const n of nodes) {
-    const key = n.parent_id ?? "__root__";
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key).push(n);
-  }
-
-  const first = byParent.get("__root__")?.[0];
-  if (!first) return nodes.map(toMessage);
-
-  const out = [];
-  let cur = first;
-  const seen = new Set();
-  while (cur && !seen.has(cur.id)) {
-    seen.add(cur.id);
-    out.push(toMessage(cur));
-    const kids = byParent.get(cur.id) || [];
-    cur = cur.selected_child_id
-      ? byId.get(cur.selected_child_id)
-      : kids[0];
-  }
-  return out;
-}
-
-function toMessage(node) {
-  const msg = { id: node.id, role: node.role, content: node.content };
-  if (node.attachments_json) {
+function toNode(row) {
+  const node = {
+    id: row.id,
+    parentId: row.parent_id,
+    role: row.role,
+    content: row.content,
+    selectedChildId: row.selected_child_id,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+  if (row.attachments_json) {
     try {
-      msg.attachments = JSON.parse(node.attachments_json);
+      node.attachments = JSON.parse(row.attachments_json);
     } catch {
       // ignore malformed attachment payloads
     }
   }
-  return msg;
+  if (row.meta_json) {
+    try {
+      const meta = JSON.parse(row.meta_json);
+      if (meta.usage) node.usage = meta.usage;
+    } catch {
+      // ignore malformed meta payloads
+    }
+  }
+  return node;
 }
 
-/** Writes the array of flat messages as a fresh linear chain, replacing any
- *  previous nodes for that conversation. Returns the new head node id. */
-function writeMessages(conversationId, messages) {
-  deleteNodesStmt.run(conversationId);
-  if (!messages?.length) return null;
+function loadNodes(conversationId) {
+  return nodesStmt.all(conversationId).map(toNode);
+}
 
+/** Converts a legacy flat message array into a linear node tree. */
+function chainFromMessages(messages) {
   const base = now();
+  const nodes = [];
   let prevId = null;
-  let headId = null;
-
-  messages.forEach((msg, i) => {
+  (messages || []).forEach((m, i) => {
     const id = generateId();
-    insertNodeStmt.run({
+    nodes.push({
       id,
-      conversation_id: conversationId,
-      parent_id: prevId,
-      role: msg.role,
-      content: typeof msg.content === "string" ? msg.content : "",
-      attachments_json: msg.attachments?.length
-        ? JSON.stringify(msg.attachments)
-        : null,
-      provider: msg.provider ?? null,
-      model: msg.model ?? null,
-      status: msg.status ?? "complete",
-      selected_child_id: null,
-      created_at: base + i,
+      parentId: prevId,
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : "",
+      attachments: m.attachments?.length ? m.attachments : undefined,
+      usage: m.usage,
+      selectedChildId: null,
+      createdAt: base + i,
     });
-    if (prevId) setChildStmt.run(id, prevId);
+    if (prevId) nodes[nodes.length - 2].selectedChildId = id;
     prevId = id;
-    headId = id;
   });
+  return { nodes, headId: prevId };
+}
 
-  return headId;
+/** Replaces all nodes for a conversation with the given tree. Accepts either
+ *  `conv.nodes` (tree) or a legacy `conv.messages` (flat chain). Returns the
+ *  head node id to store on the conversation row. */
+function writeTree(conversationId, conv) {
+  deleteNodesStmt.run(conversationId);
+
+  let nodes;
+  let headId;
+  if (Array.isArray(conv.nodes)) {
+    nodes = conv.nodes;
+    headId = conv.headId ?? null;
+  } else {
+    const chain = chainFromMessages(conv.messages);
+    nodes = chain.nodes;
+    headId = conv.headId ?? chain.headId;
+  }
+  if (!nodes.length) return null;
+
+  for (const n of nodes) {
+    insertNodeStmt.run({
+      id: n.id,
+      conversation_id: conversationId,
+      parent_id: n.parentId ?? null,
+      role: n.role,
+      content: typeof n.content === "string" ? n.content : "",
+      attachments_json: n.attachments?.length
+        ? JSON.stringify(n.attachments)
+        : null,
+      provider: n.provider ?? null,
+      model: n.model ?? null,
+      status: n.status ?? "complete",
+      selected_child_id: n.selectedChildId ?? null,
+      meta_json: n.usage ? JSON.stringify({ usage: n.usage }) : null,
+      created_at: n.createdAt ?? now(),
+    });
+  }
+
+  const ids = new Set(nodes.map((n) => n.id));
+  return ids.has(headId) ? headId : nodes[nodes.length - 1].id;
 }
 
 export function listConversations() {
@@ -128,19 +143,21 @@ export function listConversations() {
     kind: row.kind,
     kbId: row.kb_id,
     agentId: row.agent_id,
+    headId: row.head_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messages: loadMessages(row.id),
+    nodes: loadNodes(row.id),
   }));
 }
 
 export function getConversation(id) {
   const row = getStmt.get(id);
   if (!row) return null;
-  return { ...row, messages: loadMessages(id) };
+  return { ...row, nodes: loadNodes(id) };
 }
 
-/** Persists the whole app state snapshot: settings + activeId + conversations. */
+/** Persists the whole app state snapshot: settings + activeId + conversations.
+ *  Concurrency: a single write transaction per request. */
 export const saveConversations = db.transaction((conversations) => {
   const keepIds = [];
 
@@ -158,7 +175,7 @@ export const saveConversations = db.transaction((conversations) => {
       created_at: createdAt,
       updated_at: now(),
     });
-    const headId = writeMessages(conv.id, conv.messages);
+    const headId = writeTree(conv.id, conv);
     updateHeadStmt.run(headId, now(), conv.id);
     keepIds.push(conv.id);
   }

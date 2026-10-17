@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS message_nodes (
   model             TEXT,
   status            TEXT    NOT NULL DEFAULT 'complete', -- complete | streaming | error | aborted
   selected_child_id TEXT,                      -- which child is on the active path
+  meta_json         TEXT,                      -- extras (e.g. token usage)
   created_at        INTEGER NOT NULL
 );
 
