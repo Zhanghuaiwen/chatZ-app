@@ -60,11 +60,14 @@
 # 安装依赖
 npm install
 
-# 启动开发服务器
+# 启动本地后端（SQLite 存储，默认 http://127.0.0.1:3001）
+npm run server
+
+# 另开一个终端，启动开发服务器
 npm run dev
 ```
 
-浏览器访问 http://localhost:5173 即可使用。
+浏览器访问 http://localhost:5173 即可使用。前端通过 Vite 代理将 `/api` 转发到本地后端。
 
 ### 构建生产版本
 
@@ -128,6 +131,11 @@ Vite 开发服务器通过代理转发 AI API 请求，无需处理跨域。配�
 chatz-app/
 ├── index.html              # 入口 HTML
 ├── vite.config.js          # Vite 配置（插件、代理）
+├── server/                 # 本地后端（Fastify + SQLite）
+│   ├── index.js            # 服务入口（API + 生产环境托管 dist）
+│   ├── db/                 # SQLite 连接与 schema
+│   ├── repositories/       # 会话 / 消息 / 设置的数据访问
+│   └── routes/             # API 路由（/api/state）
 ├── src/
 │   ├── main.jsx            # React 入口
 │   ├── App.jsx             # 主应用组件（状态管理、发送逻辑、主题切换）
@@ -193,6 +201,6 @@ A: 因为 `vite.config.js` 中已配置代理覆写 `Origin` 头，重启开发�
 | 构建工具 | Vite 8                     |
 | 语言     | JavaScript (JSX)           |
 | 样式     | 原生 CSS（CSS 变量主题）   |
-| 数据存储 | 浏览器 localStorage        |
+| 数据存储 | 本地 SQLite（`server/data/chatz.db`） |
 | 代码检查 | oxlint                     |
 

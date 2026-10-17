@@ -18,6 +18,11 @@ export const PROVIDERS = {
         name: "deepseek-ai/DeepSeek-V4-Pro（付费",
       },
       { id: "tencent/Hunyuan-MT-7B", name: "腾讯混元翻译" },
+      { id: "zai-org/GLM-4.6V", name: "GLM-4.6V（视觉理解）" },
+      {
+        id: "Qwen/Qwen3.5-35B-A3B",
+        name: "Qwen3.5-35B-A3B",
+      },
       { id: "deepseek-ai/DeepSeek-OCR", name: "DeepSeek OCR" },
     ],
   },

@@ -1,7 +1,8 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import "./App.css";
 import { DEFAULT_SETTINGS, PROVIDERS, generateId } from "./constants";
-import { loadData, saveData } from "./utils";
+import { readFileAsDataURL, readFileAsText } from "./utils";
+import { loadState, saveState } from "./store/api";
 import {
   buildAllMessages,
   buildChatRequest,
@@ -15,16 +16,12 @@ import ChatWindow from "./components/ChatWindow";
 import InputArea from "./components/InputArea";
 
 export default function App() {
-  const saved = loadData();
-  const [conversations, setConversations] = useState(
-    saved?.conversations || [],
-  );
-  const [activeId, setActiveId] = useState(saved?.activeId || null);
+  const [conversations, setConversations] = useState([]);
+  const [activeId, setActiveId] = useState(null);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [settings, setSettings] = useState(() =>
-    saved?.settings?.provider ? saved.settings : DEFAULT_SETTINGS,
-  );
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     return typeof window !== "undefined" && window.innerWidth > 768;
@@ -43,6 +40,8 @@ export default function App() {
   const sendingRef = useRef(false);
   const abortRef = useRef(null);
   const roundRef = useRef(0);
+  const hydratedRef = useRef(false);
+  const lastPersistedRef = useRef(null);
 
   const activeConv = conversations.find((c) => c.id === activeId);
   const messages = activeConv?.messages || [];
@@ -50,7 +49,37 @@ export default function App() {
     typeof window !== "undefined" && window.innerWidth <= 768;
 
   useEffect(() => {
-    saveData({ conversations, activeId, settings });
+    let cancelled = false;
+    loadState()
+      .then((state) => {
+        if (cancelled) return;
+        setConversations(state.conversations || []);
+        setActiveId(state.activeId || null);
+        if (state.settings?.provider) setSettings(state.settings);
+        lastPersistedRef.current = JSON.stringify({
+          conversations: state.conversations || [],
+          activeId: state.activeId || null,
+          settings: state.settings?.provider ? state.settings : DEFAULT_SETTINGS,
+        });
+      })
+      .catch((err) => {
+        console.error("加载本地数据失败:", err);
+      })
+      .finally(() => {
+        if (!cancelled) hydratedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const snapshot = { conversations, activeId, settings };
+    const json = JSON.stringify(snapshot);
+    if (json === lastPersistedRef.current) return;
+    lastPersistedRef.current = json;
+    saveState(snapshot);
   }, [conversations, activeId, settings]);
 
   useEffect(() => {
@@ -91,8 +120,52 @@ export default function App() {
       ...prev,
     ]);
     setActiveId(id);
+    setAttachments([]);
     if (isMobile) setSidebarOpen(false);
   };
+
+  const MAX_ATTACHMENTS = 5;
+
+  /** Reads selected files into attachment objects (image/video/audio/text). */
+  const handleAddAttachments = async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+
+    const items = [];
+    for (const file of list) {
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      const isAudio = file.type.startsWith("audio/");
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      const isText =
+        file.type.startsWith("text/") ||
+        [
+          "txt", "md", "js", "jsx", "ts", "tsx", "py", "json",
+          "css", "html", "csv", "log", "yml", "yaml",
+        ].includes(ext);
+
+      let item = null;
+      if (isImage) {
+        item = { type: "image", name: file.name, dataUrl: await readFileAsDataURL(file) };
+      } else if (isVideo) {
+        item = { type: "video", name: file.name, dataUrl: await readFileAsDataURL(file) };
+      } else if (isAudio) {
+        item = { type: "audio", name: file.name, dataUrl: await readFileAsDataURL(file) };
+      } else if (isText) {
+        item = { type: "text", name: file.name, text: await readFileAsText(file) };
+      }
+      if (item) items.push({ id: generateId(), ...item });
+    }
+    if (!items.length) return;
+
+    setAttachments((prev) => {
+      const room = Math.max(0, MAX_ATTACHMENTS - prev.length);
+      return [...prev, ...items.slice(0, room)];
+    });
+  };
+
+  const removeAttachment = (id) =>
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
 
   const deleteConversation = (id) => {
     setConversations((prev) => prev.filter((c) => c.id !== id));
@@ -105,8 +178,9 @@ export default function App() {
   const ensureConversation = (text) => {
     if (activeId) return activeId;
     const id = generateId();
+    const title = text.trim() || attachments[0]?.name || "新对话";
     setConversations((prev) => [
-      { id, title: text.slice(0, 30), messages: [] },
+      { id, title: title.slice(0, 30), messages: [] },
       ...prev,
     ]);
     setActiveId(id);
@@ -131,7 +205,13 @@ export default function App() {
   };
 
   const sendMessage = async (text) => {
-    if (!text?.trim() || isLoading || sendingRef.current) return;
+    if (
+      (!text?.trim() && attachments.length === 0) ||
+      isLoading ||
+      sendingRef.current
+    ) {
+      return;
+    }
 
     if (settings.provider === "siliconflow" && !settings.apiKey) {
       setShowSettings(true);
@@ -142,12 +222,18 @@ export default function App() {
     const round = ++roundRef.current;
     const convId = ensureConversation(text);
 
-    const userMsg = { role: "user", content: text.trim() };
+    const userMsg = {
+      role: "user",
+      content: text.trim(),
+      ...(attachments.length ? { attachments } : {}),
+    };
+    const title = text.trim() || attachments[0]?.name || "新对话";
     updateConversation(convId, (c) => ({
       ...c,
-      title: c.messages.length === 0 ? text.slice(0, 30) : c.title,
+      title: c.messages.length === 0 ? title.slice(0, 30) : c.title,
       messages: [...c.messages, userMsg],
     }));
+    setAttachments([]);
     setInput("");
     setIsLoading(true);
 
@@ -159,10 +245,24 @@ export default function App() {
 
     try {
       const history = conversations.find((c) => c.id === convId)?.messages || [];
-      const allMessages = buildAllMessages(history, userMsg);
-      const { url, options } = buildChatRequest(settings, allMessages, controller.signal);
+      const allMessages = buildAllMessages(history, userMsg, settings.provider);
+      const requestParams = { ...settings, messages: allMessages };
+      const { url, options } = buildChatRequest(requestParams, controller.signal);
 
-      const res = await fetch(url, options);
+      let res;
+      try {
+        res = await fetch(url, options);
+      } catch (err) {
+        // Some embedded webviews / older engines reject the AbortSignal when
+        // converting RequestInit. Retry once without a signal so the request
+        // can still go through (stop-generation then simply won't abort it).
+        if (String(err?.message).includes("AbortSignal")) {
+          const fallback = buildChatRequest(requestParams, undefined);
+          res = await fetch(fallback.url, fallback.options);
+        } else {
+          throw err;
+        }
+      }
       if (!res.ok) throw new Error(await readApiError(res));
 
       const parser = createStreamParser({
@@ -310,6 +410,9 @@ export default function App() {
           isLoading={isLoading}
           textareaRef={textareaRef}
           autoResize={autoResize}
+          attachments={attachments}
+          onAddAttachments={handleAddAttachments}
+          onRemoveAttachment={removeAttachment}
         />
       </main>
 

@@ -1,17 +1,19 @@
-import { STORAGE_KEY } from "./constants";
-
-export function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore malformed data
-  }
-  return null;
+export function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
-export function saveData(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+export function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
 }
 
 /**

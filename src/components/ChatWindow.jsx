@@ -56,12 +56,45 @@ export default function ChatWindow({
               <div className={`message-avatar ${msg.role}`}>
                 {msg.role === "user" ? "U" : "Z"}
               </div>
-              <div
-                className="message-content"
-                dangerouslySetInnerHTML={{
-                  __html: messageHtml(msg, isLoading, i === messages.length - 1),
-                }}
-              />
+              <div className="message-body">
+                {msg.role === "user" && msg.attachments?.length > 0 && (
+                  <div className="message-attachments">
+                    {msg.attachments.map((att) => (
+                      <div
+                        key={att.id}
+                        className={`message-attachment attachment-${att.type}`}
+                      >
+                        {att.type === "image" ? (
+                          <img src={att.dataUrl} alt={att.name} />
+                        ) : (
+                          <div className="message-attachment-file">
+                            <span className="message-attachment-type">
+                              {att.type === "video"
+                                ? "VID"
+                                : att.type === "audio"
+                                  ? "AUD"
+                                  : "TXT"}
+                            </span>
+                            <span className="message-attachment-name">
+                              {att.name}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div
+                  className="message-content"
+                  dangerouslySetInnerHTML={{
+                    __html: messageHtml(
+                      msg,
+                      isLoading,
+                      i === messages.length - 1,
+                    ),
+                  }}
+                />
+              </div>
             </div>
           ))}
           {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
